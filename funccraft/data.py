@@ -77,7 +77,7 @@ def prepare() -> datasets.Dataset:
 		trust_remote_code=True
 	)
 
-	dataset = dataset.select(range(100)) # TODO reset it to 1000
+	dataset = dataset.select(range(1000))
 
 	processed_dataset = dataset.map(
 		lambda example: parse_single_function(example['whole_func_string'])
