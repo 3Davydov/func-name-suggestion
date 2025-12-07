@@ -1,14 +1,11 @@
-from collections.abc import Iterable
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline # type: ignore
-import pandas as pd # type: ignore
-from typing import List, Dict, Any
-import re
+from transformers import AutoTokenizer, T5ForConditionalGeneration, pipeline # type: ignore
+from typing import List, Dict
 
 import datasets # type: ignore
 import evaluate # type: ignore
 
-tokenizer = AutoTokenizer.from_pretrained("Salesforce/codeT5-base")
-model = AutoModelForSeq2SeqLM.from_pretrained("Salesforce/codeT5-base")
+tokenizer = AutoTokenizer.from_pretrained("Salesforce/codet5p-220m")
+model = T5ForConditionalGeneration.from_pretrained("Salesforce/codet5p-220m")
 mask_filler = pipeline("text2text-generation", model=model, tokenizer=tokenizer)
 
 def run_evaluate(results: List[Dict]) -> Dict[str, float]:
@@ -36,51 +33,56 @@ def run_evaluate(results: List[Dict]) -> Dict[str, float]:
 	print(f"Exact Match : {round(exact_match_score, 4)}")
 	print(f"ROUGE-Scores : {average_rouge_score}")
 
-def predict_function_name(function_body: str, function_name: str) -> list[dict]:
-	masked_code = f"def <extra_id_0>():\n\t{function_body}"
+def predict_function_name(function_body: str, language: str) -> dict:
+	# truncate to 512 symbols
+	function_body = function_body[:512]
 
-	predictions = mask_filler(masked_code, max_length=20, num_return_sequences=1, truncation=True)
-	generated_text = predictions[0]['generated_text']
+	if (language == "python"):
+		inputs = tokenizer.encode(f"def <extra_id_0>():\n\t{function_body}", return_tensors="pt")
+	elif (language == "java"):
+		inputs = tokenizer.encode(f"static void <extra_id_0>()\n\t{function_body}", return_tensors="pt")
+	else:
+		raise NotImplementedError(f"cannot use {language} language")
+
+	outputs = model.generate(inputs, max_length=20, num_return_sequences=1)
+
+	generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 	start_index = generated_text.find('<extra_id_0>')
 	end_index = generated_text.find('<extra_id_1>')
+
 	if start_index != -1 and end_index != -1 and end_index > start_index:
 		predicted_name = generated_text[start_index + len('<extra_id_0>'):end_index].strip()
 	else:
 		words = generated_text.replace('<extra_id_0>', '').strip().split()
-		if words:
-			predicted_name = words[0]
+		predicted_name = words[0] if words else ''
 
-	cleaned_name = re.sub(r'[^a-zA-Z0-9_]', '', predicted_name)
-	return [{'token_str': cleaned_name}]
+	cleaned_name = predicted_name.split('(')[0]
+	return {'token_str': cleaned_name}
 
+def predict(dataset: datasets.Dataset, language_str: str, model: str) -> None:
+	only_body_results = []
+	body_with_comments_results = []
 
-def predict(dataset: datasets.Dataset, model: str) -> None:
-	results = []
+	if (model != "codeT5"):
+		raise NotImplementedError("can use only codeT5 model")
 
 	for example in dataset:
 		fbody = example['extracted_body_without_comments']
+		fbody_with_comments = example['extracted_body_with_comments']
 		fname = example['extracted_function_name']
 
-		if not fbody or not fname:
-			continue
-
-		prediction_list = predict_function_name(fbody, fname)
-
-		if not prediction_list:
-			raise LookupError("Cannot predict function name by body")
-
-		# Проверяем, есть ли истинное имя функции среди топ-5 предсказаний
-		predicted_tokens = [p['token_str'].strip() for p in prediction_list]
-
-		is_correct = (fname == predicted_tokens[0])
-		if (is_correct):
-			print(f"real name {fname} vs prediction {predicted_tokens[0]}")
-
-		results.append({
+		only_body_prediction = predict_function_name(fbody, language_str)
+		only_body_results.append({
 			'function_name': fname,
-			'prediction': predicted_tokens[0],
-			'is_correct': is_correct
+			'prediction': only_body_prediction['token_str'],
 		})
 
-	run_evaluate(results)
+		body_with_comments_prediction = predict_function_name(fbody_with_comments, language_str)
+		body_with_comments_results.append({
+			'function_name': fname,
+			'prediction': body_with_comments_prediction['token_str'],
+		})
+
+	run_evaluate(only_body_results)
+	run_evaluate(body_with_comments_results)

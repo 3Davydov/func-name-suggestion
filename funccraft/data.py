@@ -3,22 +3,36 @@ import pandas as pd # type: ignore
 import tree_sitter_python as tspython # type: ignore
 from pathlib import Path
 from tree_sitter import Language, Parser, Node # type: ignore
+from tree_sitter_languages import get_language, get_parser
 
-def parse_single_function(source_code: str) -> dict | None:
-	language = Language(tspython.language())
-	parser = Parser()
-	parser.set_language(language)
+def parse_single_function(source_code: str, language_str: str) -> dict | None:
+	if language_str == "python":
+		language = get_language('python')
+		parser = get_parser('python')
+		query_string = """
+		(function_definition
+			name: (identifier) @function_name
+			body: (block) @func_code_string
+		)
+		"""
+	elif language_str == "java":
+		language = get_language('java')
+		parser = get_parser('java')
+		query_string = """
+		(method_declaration
+			name: (identifier) @function_name
+			body: (block) @func_code_string
+		)
+		"""
+	else:
+		raise NotImplementedError(f"cannot use {language_str} language")
 
+	# parser = Parser()
+	# parser.set_language(language)
 	code_bytes = source_code.encode('utf8')
 	tree = parser.parse(code_bytes)
 	root_node = tree.root_node
 
-	query_string = """
-	(function_definition
-		name: (identifier) @function_name
-		body: (block) @func_code_string
-	)
-	"""
 	query = language.query(query_string)
 	captures = query.captures(root_node) # executes query on the tree
 
@@ -46,6 +60,7 @@ def parse_single_function(source_code: str) -> dict | None:
 
 	return parsed_function
 
+# In case of java code this is more about removing annotations...
 def extract_body_without_comments(body_node: Node, source_bytes: bytes) -> str:
 	filtered_body_parts = []
 
@@ -67,12 +82,13 @@ def extract_body_without_comments(body_node: Node, source_bytes: bytes) -> str:
 	# Join parts of function body + delete empty lines and redundant indents
 	return "\n".join(part.strip() for part in filtered_body_parts if part.strip())
 
+def prepare(language: str) -> datasets.Dataset:
+	if language != "python" and language != "java":
+		raise NotImplementedError(f"cannot use {language} language")
 
-
-def prepare() -> datasets.Dataset:
 	dataset = datasets.load_dataset(
 		'code_search_net',
-		'python',
+		language,
 		split='test',
 		trust_remote_code=True
 	)
@@ -80,7 +96,7 @@ def prepare() -> datasets.Dataset:
 	dataset = dataset.select(range(1000))
 
 	processed_dataset = dataset.map(
-		lambda example: parse_single_function(example['whole_func_string'])
+		lambda example: parse_single_function(example['whole_func_string'], language)
 	)
 
 	print("\nExample of extracted features\n")

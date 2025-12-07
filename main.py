@@ -24,7 +24,11 @@ def parse_args():
         type=Path,
         default=default_data_path,
     )
-
+    prepare_data_parser.add_argument(
+        '-l',
+        '--language',
+        default="python",
+    )
     predict_parser = subparsers.add_parser('predict-names')
     predict_parser.set_defaults(func=predict_names)
     predict_parser.add_argument(
@@ -37,20 +41,25 @@ def parse_args():
     predict_parser.add_argument(
         '-m',
         '--model',
-        default='Salesforce/codet5p-220m',
+        default='codeT5',
+    )
+    predict_parser.add_argument(
+        '-l',
+        '--language',
+        default='python',
     )
 
     return parser.parse_args()
 
 
 def prepare_data(args):
-    dataset = prepare()
+    dataset = prepare(args.language)
     save_dataset(dataset, args.output)
 
 
 def predict_names(args):
     dataset = load_dataset(args.dataset)
-    predict(dataset, args.model)
+    predict(dataset, args.language, args.model)
 
 
 if __name__ == '__main__':
