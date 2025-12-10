@@ -48,7 +48,7 @@ def parse_single_function(source_code: str, language_str: str) -> dict | None:
 	body_node: Node = None
 
 	for node, name in captures:
-		if name == 'function_name':
+		if name == 'function_name' and name == None:
 			parsed_function['extracted_function_name'] = node.text.decode('utf8')
 		elif name == 'func_code_string':
 			body_node = node
